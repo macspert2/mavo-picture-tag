@@ -315,12 +315,9 @@
 		if ( opts.useFigure ) lines.push( '<figure class="wp-picture-figure">' );
 		lines.push( ( opts.useFigure ? '\t' : '' ) + '<picture>' );
 
-		var fullUrl = opts.sizes['full'] ? opts.sizes['full'].url : null;
-
 		opts.sources.forEach( function ( s ) {
 			var sizeData = opts.sizes[ s.sizeName ];
 			if ( ! sizeData ) return;
-			if ( fullUrl && sizeData.url === fullUrl ) return;
 			var media = '(min-width: ' + s.minWidth + 'px)';
 			if ( sizeData.webp ) {
 				lines.push( indent + '<source type="image/webp" media="' + media + '" srcset="' + esc( sizeData.webp ) + '">' );

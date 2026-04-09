@@ -53,13 +53,13 @@
 		/*  Toolbar button                                                   */
 		/* ---------------------------------------------------------------- */
 
-		/* Tell TinyMCE's schema that <source> is a valid element with the
-		   attributes we need. Without this, editor.insertContent() silently
-		   strips every <source> child of <picture> because it is not in
-		   TinyMCE 4's default whitelist. Doing it here (inside the plugin,
-		   on 'init') is the correct internal API — no PHP filter required. */
+		/* Register <source> in TinyMCE's schema so it is preserved by both
+		   the HTML parser (on sync from Code tab) and the serialiser (on
+		   save). addValidChildren also permits <source> as a child of
+		   <picture>, which TinyMCE 4's default schema does not allow. */
 		editor.on( 'init', function () {
 			editor.schema.addValidElements( 'source[srcset|type|media|sizes]' );
+			editor.schema.addValidChildren( '+picture[source|img]' );
 		} );
 
 		editor.addButton( 'mavo_picture', {
@@ -362,13 +362,24 @@
 
 				$overlay.remove();
 
+				/* Use editor.dom to create and insert nodes directly into the
+				   editor's iframe DOM, bypassing TinyMCE's HTML parser. This
+				   is the only reliable way to preserve <source> elements;
+				   editor.insertContent() runs the markup through TinyMCE's
+				   whitelist filter even after schema updates. */
+				var newNode = editor.dom.create( 'div', {}, html ).firstChild;
+
 				if ( existingNode ) {
-					$( existingNode ).replaceWith( html );
-					editor.fire( 'change' );
+					existingNode.parentNode.replaceChild( newNode, existingNode );
 					editingNode = null;
 				} else {
-					editor.insertContent( html );
+					var sel   = editor.selection.getNode();
+					var block = editor.dom.getParent( sel, editor.dom.isBlock ) || editor.getBody();
+					editor.dom.insertAfter( newNode, block );
+					editor.selection.select( newNode );
+					editor.selection.collapse( false );
 				}
+				editor.fire( 'change' );
 			} );
 		}
 
@@ -411,14 +422,9 @@
 			if ( opts.useFigure ) { lines.push( '<figure class="wp-picture-figure">' ); }
 			lines.push( ( opts.useFigure ? '\t' : '' ) + '<picture>' );
 
-			/* Skip any source whose URL resolves to the full-size file
-			   (WordPress silent fallback when no resized copy exists). */
-			var fullUrl = opts.sizes['full'] ? opts.sizes['full'].url : null;
-
 			opts.sources.forEach( function ( s ) {
 				var sizeData = opts.sizes[ s.sizeName ];
 				if ( ! sizeData ) { return; }
-				if ( fullUrl && sizeData.url === fullUrl ) { return; }
 
 				var media = '(min-width: ' + s.minWidth + 'px)';
 
