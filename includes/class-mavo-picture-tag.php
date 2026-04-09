@@ -238,21 +238,27 @@ class Mavo_Picture_Tag {
 			wp_send_json_error( [ 'message' => 'Invalid attachment.' ] );
 		}
 
-		$meta   = wp_get_attachment_metadata( $attachment_id );
-		$sizes  = [];
+		$meta  = wp_get_attachment_metadata( $attachment_id );
+		$sizes = [];
+
+		// Fetch the full-size URL first. We use it as a sentinel: when WordPress
+		// has no resized file for a given size it silently returns the full-size
+		// URL as a fallback. Comparing URLs lets us detect and skip those entries
+		// without relying on $src[3] (unreliable with Jetpack Photon) or on
+		// wp_get_attachment_metadata() (can return false in AJAX context on some
+		// CDN/caching setups, which would wrongly filter every intermediate size).
+		$full     = wp_get_attachment_image_src( $attachment_id, 'full' );
+		$full_url = $full ? $full[0] : null;
 
 		// Collect every registered intermediate size.
 		foreach ( get_intermediate_image_sizes() as $size_name ) {
-			// Only include sizes whose file was actually generated for this attachment.
-			// wp_get_attachment_metadata()['sizes'] is the source of truth: a key
-			// exists there only when WordPress physically created that resized file.
-			// This is more reliable than checking $src[3], which CDN plugins such as
-			// Jetpack Photon can set to false even for properly-resized images.
-			if ( empty( $meta['sizes'][ $size_name ] ) ) {
-				continue;
-			}
 			$src = wp_get_attachment_image_src( $attachment_id, $size_name );
 			if ( ! $src ) {
+				continue;
+			}
+			// Skip sizes whose URL is identical to the full-size URL — that is
+			// WordPress returning the original as a fallback (no resized file exists).
+			if ( $full_url !== null && $src[0] === $full_url ) {
 				continue;
 			}
 			$sizes[ $size_name ] = [
@@ -265,8 +271,7 @@ class Mavo_Picture_Tag {
 			];
 		}
 
-		// Also include the full/original size.
-		$full = wp_get_attachment_image_src( $attachment_id, 'full' );
+		// Always include the full/original size (no sentinel comparison needed).
 		if ( $full ) {
 			$sizes['full'] = [
 				'url'    => $full[0],
