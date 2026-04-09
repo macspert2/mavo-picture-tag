@@ -241,24 +241,13 @@ class Mavo_Picture_Tag {
 		$meta  = wp_get_attachment_metadata( $attachment_id );
 		$sizes = [];
 
-		// Fetch the full-size URL first. We use it as a sentinel: when WordPress
-		// has no resized file for a given size it silently returns the full-size
-		// URL as a fallback. Comparing URLs lets us detect and skip those entries
-		// without relying on $src[3] (unreliable with Jetpack Photon) or on
-		// wp_get_attachment_metadata() (can return false in AJAX context on some
-		// CDN/caching setups, which would wrongly filter every intermediate size).
-		$full     = wp_get_attachment_image_src( $attachment_id, 'full' );
-		$full_url = $full ? $full[0] : null;
-
-		// Collect every registered intermediate size.
+		// Return every registered intermediate size without filtering.
+		// Whether a URL is a genuine resize or a silent fallback to the full file
+		// is detected on the JS side at insert time, where URLs can be compared
+		// against the full-size URL without any CDN or caching interference.
 		foreach ( get_intermediate_image_sizes() as $size_name ) {
 			$src = wp_get_attachment_image_src( $attachment_id, $size_name );
 			if ( ! $src ) {
-				continue;
-			}
-			// Skip sizes whose URL is identical to the full-size URL — that is
-			// WordPress returning the original as a fallback (no resized file exists).
-			if ( $full_url !== null && $src[0] === $full_url ) {
 				continue;
 			}
 			$sizes[ $size_name ] = [
@@ -271,7 +260,8 @@ class Mavo_Picture_Tag {
 			];
 		}
 
-		// Always include the full/original size (no sentinel comparison needed).
+		// Also include the full/original size.
+		$full = wp_get_attachment_image_src( $attachment_id, 'full' );
 		if ( $full ) {
 			$sizes['full'] = [
 				'url'    => $full[0],

@@ -393,9 +393,16 @@
 			lines.push( opts.useFigure ? '<figure class="wp-picture-figure">' : '' );
 			lines.push( ( opts.useFigure ? '\t' : '' ) + '<picture>' );
 
+			/* Full-size URL sentinel: skip any source that resolved to the
+			   original file (WordPress silent fallback when no resized file
+			   exists). The JS comparison is immune to CDN / caching variance
+			   that breaks server-side checks like $src[3] or metadata lookups. */
+			var fullUrl = opts.sizes['full'] ? opts.sizes['full'].url : null;
+
 			opts.sources.forEach( function ( s ) {
 				var sizeData = opts.sizes[ s.sizeName ];
 				if ( ! sizeData ) return;
+				if ( fullUrl && sizeData.url === fullUrl ) return;
 
 				var media = '(min-width: ' + s.minWidth + 'px)';
 
