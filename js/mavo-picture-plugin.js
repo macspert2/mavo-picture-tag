@@ -164,12 +164,12 @@
 			/* Parse existing node (edit mode) or set up defaults (insert mode). */
 			var prefill = existingNode ? parsePictureNode( existingNode, sizes ) : null;
 
-			var defaultSources = sizeNames
-				.filter( function ( k ) { return k !== 'full'; } )
-				.slice( 0, 4 )
-				.map( function ( k, idx ) {
-					return { sizeName: k, minWidth: [ 960, 768, 480, 320 ][ idx ] || ( 320 - idx * 100 ) };
-				} );
+			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
+			var defaultSources = [
+				{ sizeName: nonFull[ 0 ], minWidth: 960 },
+				{ sizeName: nonFull[ 2 ], minWidth: 480 },
+				{ sizeName: nonFull[ 3 ], minWidth: 320 }
+			].filter( function ( s ) { return s.sizeName; } );
 
 			var sourcesToRender = prefill ? prefill.sources : defaultSources;
 			sourceRows = sourcesToRender.slice();

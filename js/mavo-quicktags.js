@@ -104,12 +104,12 @@
 		} );
 
 		/* Default sources: up to 3 largest non-full sizes. */
-		var defaultSources = names
-			.filter( function ( k ) { return k !== 'full'; } )
-			.slice( 0, 4 )
-			.map( function ( k, idx ) {
-				return { sizeName: k, minWidth: [ 960, 768, 480, 320 ][ idx ] || ( 320 - idx * 100 ) };
-			} );
+		var nonFull = names.filter( function ( k ) { return k !== 'full'; } );
+		var defaultSources = [
+			{ sizeName: nonFull[ 0 ], minWidth: 960 },
+			{ sizeName: nonFull[ 2 ], minWidth: 480 },
+			{ sizeName: nonFull[ 3 ], minWidth: 320 }
+		].filter( function ( s ) { return s.sizeName; } );
 
 		sourceRows = defaultSources.slice();
 

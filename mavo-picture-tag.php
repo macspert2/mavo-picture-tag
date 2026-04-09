@@ -3,7 +3,7 @@
  * Plugin Name:  Mavo Picture Tag
  * Plugin URI:   https://github.com/mamanvoyage/mavo-picture-tag
  * Description:  Adds a TinyMCE button to insert fully-responsive &lt;picture&gt; tags (WebP + JPEG/PNG sources, auto-detected from the media library). Requires the Classic Editor plugin.
- * Version:      1.2.0
+ * Version:      1.3.0
  * Author:       Mavo
  * License:      GPL-2.0-or-later
  * Requires WP:  6.0
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'MAVO_PICTURE_TAG_VERSION', '1.2.0' );
+define( 'MAVO_PICTURE_TAG_VERSION', '1.3.0' );
 define( 'MAVO_PICTURE_TAG_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MAVO_PICTURE_TAG_URL', plugin_dir_url( __FILE__ ) );
 
