@@ -244,7 +244,9 @@ class Mavo_Picture_Tag {
 		// Collect every registered intermediate size.
 		foreach ( get_intermediate_image_sizes() as $size_name ) {
 			$src = wp_get_attachment_image_src( $attachment_id, $size_name );
-			if ( ! $src ) {
+			// $src[3] is false when WordPress has no resized file for this size
+			// and returns the full-size URL as a fallback — skip those.
+			if ( ! $src || ! $src[3] ) {
 				continue;
 			}
 			$sizes[ $size_name ] = [
@@ -322,19 +324,28 @@ class Mavo_Picture_Tag {
 			}
 		}
 
-		// 2. Filesystem check: swap extension to .webp and see if it exists.
+		// 2. Filesystem checks: try several WebP filename conventions.
 		$src = wp_get_attachment_image_src( $attachment_id, $size_name );
 		if ( ! $src ) {
 			return null;
 		}
 
-		$upload_dir  = wp_upload_dir();
-		$relative    = str_replace( $upload_dir['baseurl'], '', $src[0] );
-		$webp_rel    = preg_replace( '/\.[^.]+$/', '.webp', $relative );
-		$webp_path   = $upload_dir['basedir'] . $webp_rel;
+		$upload_dir = wp_upload_dir();
+		$relative   = str_replace( $upload_dir['baseurl'], '', $src[0] );
 
-		if ( file_exists( $webp_path ) ) {
-			return $upload_dir['baseurl'] . $webp_rel;
+		// 2a. Appended extension: image-640x800.jpg → image-640x800.jpg.webp
+		//     (used by WebP Express and similar plugins that keep the original
+		//     filename intact and simply append .webp).
+		$webp_appended = $relative . '.webp';
+		if ( file_exists( $upload_dir['basedir'] . $webp_appended ) ) {
+			return $upload_dir['baseurl'] . $webp_appended;
+		}
+
+		// 2b. Exact extension swap: image-640x800.jpg → image-640x800.webp
+		//     (fallback for plugins that replace the extension instead).
+		$webp_swapped = preg_replace( '/\.[^.\/]+$/', '.webp', $relative );
+		if ( file_exists( $upload_dir['basedir'] . $webp_swapped ) ) {
+			return $upload_dir['baseurl'] . $webp_swapped;
 		}
 
 		return null;
