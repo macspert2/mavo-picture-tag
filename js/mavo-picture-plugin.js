@@ -177,7 +177,7 @@
 			var defaultSources = [
 				{ sizeName: nonFull[ 0 ], minWidth: 960 },
 				{ sizeName: nonFull[ 2 ], minWidth: 480 },
-				{ sizeName: nonFull[ 3 ], minWidth: 320 }
+				{ sizeName: nonFull[ 4 ], minWidth: 320 }
 			].filter( function ( s ) { return s.sizeName; } );
 
 			var sourcesToRender = prefill ? prefill.sources : defaultSources;
