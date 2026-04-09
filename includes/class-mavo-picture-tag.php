@@ -243,10 +243,16 @@ class Mavo_Picture_Tag {
 
 		// Collect every registered intermediate size.
 		foreach ( get_intermediate_image_sizes() as $size_name ) {
+			// Only include sizes whose file was actually generated for this attachment.
+			// wp_get_attachment_metadata()['sizes'] is the source of truth: a key
+			// exists there only when WordPress physically created that resized file.
+			// This is more reliable than checking $src[3], which CDN plugins such as
+			// Jetpack Photon can set to false even for properly-resized images.
+			if ( empty( $meta['sizes'][ $size_name ] ) ) {
+				continue;
+			}
 			$src = wp_get_attachment_image_src( $attachment_id, $size_name );
-			// $src[3] is false when WordPress has no resized file for this size
-			// and returns the full-size URL as a fallback — skip those.
-			if ( ! $src || ! $src[3] ) {
+			if ( ! $src ) {
 				continue;
 			}
 			$sizes[ $size_name ] = [
