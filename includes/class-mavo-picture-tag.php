@@ -96,7 +96,7 @@ class Mavo_Picture_Tag {
 
 	/** Point TinyMCE to our JS plugin file. */
 	public function register_tinymce_plugin( array $plugins ): array {
-		$plugins['mavo_picture'] = MAVO_PICTURE_TAG_URL . 'js/mavo-picture-plugin.js';
+		$plugins['mavo_picture'] = MAVO_PICTURE_TAG_URL . 'js/mavo-picture-plugin.js?ver=' . MAVO_PICTURE_TAG_VERSION;
 		return $plugins;
 	}
 

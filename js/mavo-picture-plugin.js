@@ -190,6 +190,13 @@
 			);
 
 			$( 'body' ).append( $overlay );
+
+			/* Belt-and-suspenders: set the fallback select value after the
+			   overlay is in the DOM. The 'selected' attribute in the HTML
+			   handles most browsers; .val() catches any edge cases where the
+			   browser resets to the first option after insertion. */
+			$overlay.find( '#mavo-qt-fallback' ).val( fallbackSize );
+
 			bindModalEvents( $overlay, sizes, existingNode );
 		}
 
