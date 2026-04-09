@@ -166,9 +166,9 @@
 
 			var defaultSources = sizeNames
 				.filter( function ( k ) { return k !== 'full'; } )
-				.slice( 0, 3 )
+				.slice( 0, 4 )
 				.map( function ( k, idx ) {
-					return { sizeName: k, minWidth: [ 960, 768, 480 ][ idx ] || ( 480 - idx * 100 ) };
+					return { sizeName: k, minWidth: [ 960, 768, 480, 320 ][ idx ] || ( 320 - idx * 100 ) };
 				} );
 
 			var sourcesToRender = prefill ? prefill.sources : defaultSources;

@@ -106,9 +106,9 @@
 		/* Default sources: up to 3 largest non-full sizes. */
 		var defaultSources = names
 			.filter( function ( k ) { return k !== 'full'; } )
-			.slice( 0, 3 )
+			.slice( 0, 4 )
 			.map( function ( k, idx ) {
-				return { sizeName: k, minWidth: [ 960, 768, 480 ][ idx ] || ( 480 - idx * 100 ) };
+				return { sizeName: k, minWidth: [ 960, 768, 480, 320 ][ idx ] || ( 320 - idx * 100 ) };
 			} );
 
 		sourceRows = defaultSources.slice();
