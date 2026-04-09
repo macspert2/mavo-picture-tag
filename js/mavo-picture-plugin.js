@@ -183,10 +183,10 @@
 
 			var sourcesHtml = buildSourceRowsHtml( sourcesToRender, sizeOptions, sizes );
 
-			/* Fallback img size: smallest non-full size, or prefilled value. */
+			/* Fallback img size: prefer 'large' or size closest to 960px. */
 			var fallbackSize = prefill
 				? prefill.fallbackSize
-				: sizeNames.filter( function ( k ) { return k !== 'full'; } ).pop() || sizeNames[ 0 ];
+				: pickDefaultFallback( sizes, sizeNames );
 
 			/* Open dialog ------------------------------------------------- */
 			dialogWin = editor.windowManager.open( {
@@ -583,6 +583,26 @@
 				'  ' + dot +
 				'</div>'
 			);
+		}
+
+		/* ---------------------------------------------------------------- */
+		/*  Default fallback size selection                                  */
+		/* ---------------------------------------------------------------- */
+
+		/**
+		 * Pick the best default fallback <img> size.
+		 * Prefers the 'large' key; otherwise the size whose width is
+		 * closest to 960 px; finally the smallest non-full size.
+		 */
+		function pickDefaultFallback( sizes, sizeNames ) {
+			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
+			if ( ! nonFull.length ) return sizeNames[ 0 ] || '';
+			if ( sizes.large ) return 'large';
+			var target = 960;
+			return nonFull.reduce( function ( best, curr ) {
+				return Math.abs( sizes[ curr ].width - target ) <
+				       Math.abs( sizes[ best ].width - target ) ? curr : best;
+			}, nonFull[ 0 ] );
 		}
 
 		/* ---------------------------------------------------------------- */

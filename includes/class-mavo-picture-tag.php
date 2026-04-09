@@ -37,6 +37,9 @@ class Mavo_Picture_Tag {
 		// Enqueue wp.media + pass JS config on post-edit screens.
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_editor_assets' ] );
 
+		// Output CSS fixes (TinyMCE dialog background + Quicktags modal styles).
+		add_action( 'admin_head', [ $this, 'output_admin_css' ] );
+
 		// AJAX: return all image sizes for an attachment.
 		add_action( 'wp_ajax_mavo_get_attachment_sizes', [ $this, 'ajax_get_attachment_sizes' ] );
 	}
@@ -109,9 +112,8 @@ class Mavo_Picture_Tag {
 		// Make sure wp.media is loaded.
 		wp_enqueue_media();
 
-		// Register a thin handle so we can attach localized data to it.
-		// The actual TinyMCE plugin JS is loaded by TinyMCE itself via
-		// mce_external_plugins; this handle is only used for wp_localize_script.
+		// Shared config object (mavoPicture) used by both the TinyMCE plugin
+		// and the Quicktags script. We attach it to a thin inline-only handle.
 		wp_register_script(
 			'mavo-picture-plugin-data',
 			false,   // no URL – inline-only handle
@@ -121,27 +123,106 @@ class Mavo_Picture_Tag {
 		);
 		wp_enqueue_script( 'mavo-picture-plugin-data' );
 
+		$i18n = [
+			'buttonTitle'    => __( 'Insert Picture Tag', 'mavo-picture-tag' ),
+			'buttonTitleEdit'=> __( 'Edit Picture Tag',   'mavo-picture-tag' ),
+			'dialogTitle'    => __( 'Insert Picture Tag', 'mavo-picture-tag' ),
+			'mediaTitle'     => __( 'Select Image',       'mavo-picture-tag' ),
+			'mediaButton'    => __( 'Use this image',     'mavo-picture-tag' ),
+			'insertBtn'      => __( 'Insert Picture',     'mavo-picture-tag' ),
+			'cancelBtn'      => __( 'Cancel',             'mavo-picture-tag' ),
+			'changeImg'      => __( 'Change Image',       'mavo-picture-tag' ),
+			'addSource'      => __( '+ Add source',       'mavo-picture-tag' ),
+			'removeSource'   => __( '− Remove last',      'mavo-picture-tag' ),
+			'noSizes'        => __( 'No sizes found for this attachment.', 'mavo-picture-tag' ),
+		];
+
 		wp_localize_script(
 			'mavo-picture-plugin-data',
 			'mavoPicture',
 			[
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( 'mavo_picture_nonce' ),
-				'i18n'    => [
-					'buttonTitle'    => __( 'Insert Picture Tag', 'mavo-picture-tag' ),
-					'buttonTitleEdit'=> __( 'Edit Picture Tag',   'mavo-picture-tag' ),
-					'dialogTitle'    => __( 'Insert Picture Tag', 'mavo-picture-tag' ),
-					'mediaTitle'     => __( 'Select Image',       'mavo-picture-tag' ),
-					'mediaButton'    => __( 'Use this image',     'mavo-picture-tag' ),
-					'insertBtn'      => __( 'Insert Picture',     'mavo-picture-tag' ),
-					'cancelBtn'      => __( 'Cancel',             'mavo-picture-tag' ),
-					'changeImg'      => __( 'Change Image',       'mavo-picture-tag' ),
-					'addSource'      => __( '+ Add source',       'mavo-picture-tag' ),
-					'removeSource'   => __( '− Remove last',      'mavo-picture-tag' ),
-					'noSizes'        => __( 'No sizes found for this attachment.', 'mavo-picture-tag' ),
-				],
+				'i18n'    => $i18n,
 			]
 		);
+
+		// Quicktags button – loaded for the Text/HTML editor tab.
+		wp_enqueue_script(
+			'mavo-quicktags',
+			MAVO_PICTURE_TAG_URL . 'js/mavo-quicktags.js',
+			[ 'jquery', 'quicktags', 'media-editor', 'mavo-picture-plugin-data' ],
+			MAVO_PICTURE_TAG_VERSION,
+			true
+		);
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Admin CSS: fix TinyMCE dialog background + Quicktags modal styles  */
+	/* ------------------------------------------------------------------ */
+
+	public function output_admin_css(): void {
+		$screen = get_current_screen();
+		if ( ! $screen || ! in_array( $screen->id, [ 'post', 'page' ], true ) ) {
+			return;
+		}
+		?>
+		<style id="mavo-picture-tag-css">
+		/* ── TinyMCE dialog: ensure white background ── */
+		.mce-window-body,
+		.mce-window .mce-container,
+		.mce-window .mce-panel,
+		.mce-window .mce-abs-layout-item,
+		.mce-window .mce-container-body {
+			background-color: #fff !important;
+		}
+
+		/* ── Quicktags modal overlay ── */
+		#mavo-qt-overlay {
+			position: fixed;
+			inset: 0;
+			background: rgba(0,0,0,.55);
+			z-index: 160000;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+		#mavo-qt-dialog {
+			background: #fff;
+			border-radius: 4px;
+			box-shadow: 0 5px 30px rgba(0,0,0,.35);
+			width: 560px;
+			max-width: calc(100vw - 40px);
+			max-height: 85vh;
+			display: flex;
+			flex-direction: column;
+			font-size: 13px;
+		}
+		#mavo-qt-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 12px 16px;
+			border-bottom: 1px solid #ddd;
+			background: #f6f7f7;
+			border-radius: 4px 4px 0 0;
+		}
+		#mavo-qt-body {
+			padding: 16px;
+			overflow-y: auto;
+			flex: 1;
+		}
+		#mavo-qt-footer {
+			display: flex;
+			justify-content: flex-end;
+			gap: 8px;
+			padding: 12px 16px;
+			border-top: 1px solid #ddd;
+			background: #f6f7f7;
+			border-radius: 0 0 4px 4px;
+		}
+		</style>
+		<?php
 	}
 
 	/* ------------------------------------------------------------------ */
