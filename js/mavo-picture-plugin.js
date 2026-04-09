@@ -53,6 +53,15 @@
 		/*  Toolbar button                                                   */
 		/* ---------------------------------------------------------------- */
 
+		/* Tell TinyMCE's schema that <source> is a valid element with the
+		   attributes we need. Without this, editor.insertContent() silently
+		   strips every <source> child of <picture> because it is not in
+		   TinyMCE 4's default whitelist. Doing it here (inside the plugin,
+		   on 'init') is the correct internal API — no PHP filter required. */
+		editor.on( 'init', function () {
+			editor.schema.addValidElements( 'source[srcset|type|media|sizes]' );
+		} );
+
 		editor.addButton( 'mavo_picture', {
 			title : i18n.buttonTitle || 'Insert Picture Tag',
 			image : ICON_SVG,
