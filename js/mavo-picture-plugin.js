@@ -254,7 +254,14 @@
 				width  : 560,
 				body   : [ { type: 'container', html: dialogHtml } ],
 				onopen: function () {
-					bindDialogEvents( sizeOptions, sizes );
+					var $body = $( 'div[role="dialog"]:visible' );
+
+					/* TinyMCE 4 sanitises container HTML and strips the
+					   'selected' attribute from <option> elements. Set the
+					   fallback select value programmatically instead. */
+					$body.find( '#mavo-fallback' ).val( fallbackSize );
+
+					bindDialogEvents( sizeOptions, sizes, $body );
 					sourceRows = sourcesToRender.map( function ( s ) {
 						return { sizeName: s.sizeName, minWidth: s.minWidth };
 					} );
@@ -266,8 +273,7 @@
 		/*  Dialog event bindings                                            */
 		/* ---------------------------------------------------------------- */
 
-		function bindDialogEvents( sizeOptions, sizes ) {
-			var $body = $( 'div[role="dialog"]:visible' );
+		function bindDialogEvents( sizeOptions, sizes, $body ) {
 
 			/* Cancel button. */
 			$body.on( 'click', '#mavo-cancel-btn', function () {
