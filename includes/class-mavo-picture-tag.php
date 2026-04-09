@@ -168,12 +168,12 @@ class Mavo_Picture_Tag {
 		}
 		?>
 		<style id="mavo-picture-tag-css">
-		/* ── TinyMCE dialog: ensure white background ── */
+		/* ── TinyMCE dialog: white background for the body area only.
+		   Intentionally NOT targeting .mce-window .mce-container globally,
+		   which would paint button backgrounds white too. ── */
 		.mce-window-body,
-		.mce-window .mce-container,
-		.mce-window .mce-panel,
-		.mce-window .mce-abs-layout-item,
-		.mce-window .mce-container-body {
+		.mce-window-body .mce-abs-layout-item,
+		.mce-window-body .mce-container-body {
 			background-color: #fff !important;
 		}
 

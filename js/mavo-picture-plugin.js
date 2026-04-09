@@ -188,98 +188,73 @@
 				? prefill.fallbackSize
 				: pickDefaultFallback( sizes, sizeNames );
 
+			/* Build the fallback <select> options with the correct default. */
+			var fallbackOpts = sizeOptions.map( function ( o ) {
+				return '<option value="' + esc( o.value ) + '"' +
+					( o.value === fallbackSize ? ' selected' : '' ) +
+					'>' + esc( o.text ) + '</option>';
+			} ).join( '' );
+
+			/* Build the entire dialog as a single HTML string.
+			   This avoids TinyMCE 4's broken absolute-layout footer (which
+			   overlaps the content with height:'auto') and the white-on-white
+			   primary button caused by our .mce-container background reset. */
+			var dialogHtml =
+				/* Image preview + change button */
+				'<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+				'<img id="mavo-preview" src="' + esc( attachment.url ) + '" ' +
+				'     style="max-width:80px;max-height:60px;object-fit:contain;border:1px solid #ddd;border-radius:3px;">' +
+				'<button type="button" id="mavo-change-img" class="button">' + esc( i18n.changeImg ) + '</button>' +
+				'</div>' +
+				/* Alt text */
+				'<label style="display:block;margin-bottom:10px;">' +
+				'<span style="display:block;font-weight:600;margin-bottom:3px;">Alt text</span>' +
+				'<input type="text" id="mavo-alt" value="' +
+				esc( prefill ? prefill.alt : ( attachment.alt || attachment.title || '' ) ) +
+				'" style="width:100%;box-sizing:border-box;">' +
+				'</label>' +
+				/* Responsive sources */
+				'<p style="margin:0 0 4px;font-weight:600;">Responsive sources ' +
+				'<span style="font-weight:400;font-size:11px;color:#666;">(largest breakpoint first)</span></p>' +
+				'<div id="mavo-sources-wrap" style="margin-bottom:4px;">' + sourcesHtml + '</div>' +
+				'<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+				'<button type="button" id="mavo-add-source" class="button button-small">' + esc( i18n.addSource ) + '</button>' +
+				'<button type="button" id="mavo-remove-source" class="button button-small">' + esc( i18n.removeSource ) + '</button>' +
+				'</div>' +
+				/* Fallback size */
+				'<label style="display:block;margin-bottom:10px;">' +
+				'<span style="display:block;font-weight:600;margin-bottom:3px;">Fallback &lt;img&gt; size</span>' +
+				'<select id="mavo-fallback" style="width:100%;">' + fallbackOpts + '</select>' +
+				'</label>' +
+				/* Options */
+				'<div style="display:flex;gap:24px;margin-bottom:10px;">' +
+				'<label><input type="checkbox" id="mavo-lazy"' +
+				( ( prefill && ! prefill.lazy ) ? '' : ' checked' ) + '> Lazy loading</label>' +
+				'<label><input type="checkbox" id="mavo-figure"' +
+				( ( prefill && ! prefill.useFigure ) ? '' : ' checked' ) + '> Wrap in &lt;figure&gt;</label>' +
+				'</div>' +
+				/* Caption */
+				'<label style="display:block;margin-bottom:16px;">' +
+				'<span style="display:block;font-weight:600;margin-bottom:3px;">Caption</span>' +
+				'<input type="text" id="mavo-caption" value="' +
+				esc( prefill ? ( prefill.caption || '' ) : '' ) +
+				'" style="width:100%;box-sizing:border-box;">' +
+				'</label>' +
+				/* Footer buttons – rendered inside the body so TinyMCE's
+				   absolute-positioned footer bar is never used. */
+				'<div style="display:flex;justify-content:flex-end;gap:8px;' +
+				'            border-top:1px solid #ddd;padding-top:12px;">' +
+				'<button type="button" id="mavo-cancel-btn" class="button">' + esc( i18n.cancelBtn ) + '</button>' +
+				'<button type="button" id="mavo-insert-btn" class="button button-primary">' + esc( i18n.insertBtn ) + '</button>' +
+				'</div>';
+
 			/* Open dialog ------------------------------------------------- */
 			dialogWin = editor.windowManager.open( {
 				title  : i18n.dialogTitle,
 				width  : 560,
-				height : 'auto',
-				body   : [
-					/* ── Image selection ── */
-					{
-						type  : 'container',
-						html  :
-							'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">' +
-							'  <img id="mavo-preview" src="' + esc( attachment.url ) + '" ' +
-							'       style="max-width:80px;max-height:60px;object-fit:contain;border:1px solid #ddd;border-radius:3px;">' +
-							'  <button id="mavo-change-img" class="button">' + esc( i18n.changeImg ) + '</button>' +
-							'</div>'
-					},
-
-					/* ── Alt text ── */
-					{
-						type      : 'textbox',
-						name      : 'altText',
-						label     : 'Alt text',
-						value     : prefill ? prefill.alt : ( attachment.alt || attachment.title || '' ),
-						multiline : false,
-						style     : 'width:100%'
-					},
-
-					/* ── Responsive sources ── */
-					{
-						type : 'container',
-						html :
-							'<p style="margin:12px 0 4px;font-weight:600;">Responsive sources ' +
-							'<span style="font-weight:400;font-size:11px;color:#666;">' +
-							'(largest breakpoint first)</span></p>' +
-							'<div id="mavo-sources-wrap" style="margin-bottom:4px;">' +
-							sourcesHtml +
-							'</div>' +
-							'<div style="display:flex;gap:8px;margin-bottom:12px;">' +
-							'  <button id="mavo-add-source" class="button button-small">' + esc( i18n.addSource ) + '</button>' +
-							'  <button id="mavo-remove-source" class="button button-small">' + esc( i18n.removeSource ) + '</button>' +
-							'</div>'
-					},
-
-					/* ── Fallback <img> size ── */
-					{
-						type    : 'listbox',
-						name    : 'fallbackSize',
-						label   : 'Fallback <img> size',
-						values  : sizeOptions,
-						value   : fallbackSize
-					},
-
-					/* ── Options ── */
-					{
-						type  : 'container',
-						html  :
-							'<div style="display:flex;gap:24px;margin:8px 0;">' +
-							'  <label><input type="checkbox" id="mavo-lazy" ' +
-							( ( prefill && ! prefill.lazy ) ? '' : 'checked' ) +
-							'> Lazy loading</label>' +
-							'  <label><input type="checkbox" id="mavo-figure" ' +
-							( ( prefill && ! prefill.useFigure ) ? '' : 'checked' ) +
-							'> Wrap in &lt;figure&gt;</label>' +
-							'</div>'
-					},
-
-					/* ── Caption (shown only when figure is checked) ── */
-					{
-						type  : 'textbox',
-						name  : 'caption',
-						label : 'Caption',
-						value : prefill ? ( prefill.caption || '' ) : ''
-					}
-				],
-
-				buttons: [
-					{
-						text    : i18n.cancelBtn,
-						onclick : function () { dialogWin.close(); }
-					},
-					{
-						text    : i18n.insertBtn,
-						subtype : 'primary',
-						onclick : function () {
-							onInsert( dialogWin );
-						}
-					}
-				],
-
+				body   : [ { type: 'container', html: dialogHtml } ],
 				onopen: function () {
-					bindDialogEvents( sizeOptions, sizes, sourcesToRender );
-					/* Sync internal sourceRows from initial HTML. */
+					bindDialogEvents( sizeOptions, sizes );
 					sourceRows = sourcesToRender.map( function ( s ) {
 						return { sizeName: s.sizeName, minWidth: s.minWidth };
 					} );
@@ -291,8 +266,18 @@
 		/*  Dialog event bindings                                            */
 		/* ---------------------------------------------------------------- */
 
-		function bindDialogEvents( sizeOptions, sizes, initialRows ) {
+		function bindDialogEvents( sizeOptions, sizes ) {
 			var $body = $( 'div[role="dialog"]:visible' );
+
+			/* Cancel button. */
+			$body.on( 'click', '#mavo-cancel-btn', function () {
+				dialogWin.close();
+			} );
+
+			/* Insert button. */
+			$body.on( 'click', '#mavo-insert-btn', function () {
+				onInsert( $body );
+			} );
 
 			/* Change image button. */
 			$body.on( 'click', '#mavo-change-img', function () {
@@ -324,13 +309,11 @@
 		/*  Collect dialog values and insert HTML                            */
 		/* ---------------------------------------------------------------- */
 
-		function onInsert( win ) {
-			var data = win.toJSON();
-
-			/* Collect source rows from the live DOM. */
-			var $rows  = $( 'div[role="dialog"]:visible .mavo-source-row' );
+		function onInsert( $dlg ) {
+			/* Collect source rows entirely from the DOM — no win.toJSON() needed
+			   since all inputs are now plain HTML elements. */
 			var sources = [];
-			$rows.each( function () {
+			$dlg.find( '.mavo-source-row' ).each( function () {
 				var $row     = $( this );
 				var minWidth = parseInt( $row.find( '.mavo-bp-width' ).val(), 10 ) || 0;
 				var sizeName = $row.find( '.mavo-bp-size' ).val();
@@ -339,29 +322,22 @@
 				}
 			} );
 
-			/* Sort largest breakpoint first. */
 			sources.sort( function ( a, b ) { return b.minWidth - a.minWidth; } );
-
-			var $dlg     = $( 'div[role="dialog"]:visible' );
-			var lazy     = $dlg.find( '#mavo-lazy' ).is( ':checked' );
-			var useFigure= $dlg.find( '#mavo-figure' ).is( ':checked' );
 
 			var html = buildPictureHTML( {
 				sources      : sources,
 				sizes        : currentSizes,
-				fallbackSize : data.fallbackSize,
-				alt          : data.altText || '',
-				caption      : data.caption || '',
-				lazy         : lazy,
-				useFigure    : useFigure
+				fallbackSize : $dlg.find( '#mavo-fallback' ).val(),
+				alt          : $dlg.find( '#mavo-alt' ).val() || '',
+				caption      : $dlg.find( '#mavo-caption' ).val() || '',
+				lazy         : $dlg.find( '#mavo-lazy' ).is( ':checked' ),
+				useFigure    : $dlg.find( '#mavo-figure' ).is( ':checked' )
 			} );
 
-			win.close();
+			dialogWin.close();
 
 			if ( editingNode ) {
-				/* Replace existing node. */
-				var $existing = $( editingNode );
-				$existing.replaceWith( html );
+				$( editingNode ).replaceWith( html );
 				editor.fire( 'change' );
 			} else {
 				editor.insertContent( html );
