@@ -5,13 +5,9 @@
  * WordPress Media Library and wraps it in a fully-responsive <picture>
  * element (WebP sources first, JPEG/PNG fallback, lazy-loaded <img>).
  *
- * The dialog lets the editor:
- *  - Change the selected image.
- *  - Edit alt text (pre-filled from the media library).
- *  - Configure up to N responsive <source> breakpoints (auto-populated
- *    from all registered WordPress image sizes for that attachment).
- *  - Choose the fallback <img> size.
- *  - Toggle lazy loading and an optional <figure>/<figcaption> wrapper.
+ * The dialog is a custom jQuery overlay appended directly to <body> —
+ * identical to the Quicktags dialog — so TinyMCE's HTML sanitisation
+ * never interferes with <select> defaults or other form state.
  *
  * Clicking an existing <picture> (or its <figure> parent) in the editor
  * re-opens the dialog pre-filled with the current values.
@@ -43,22 +39,22 @@
 	tinymce.PluginManager.add( 'mavo_picture', function ( editor ) {
 
 		/** Currently cached sizes from the last AJAX call. */
-		var currentSizes   = {};
+		var currentSizes  = {};
 		/** Attachment data from wp.media for the current dialog session. */
-		var currentAttach  = null;
+		var currentAttach = null;
 		/** Tracks dynamic source rows in the dialog. */
-		var sourceRows     = [];
-		/** Reference to the open TinyMCE window (if any). */
-		var dialogWin      = null;
+		var sourceRows    = [];
+		/** Size options list (shared across add/remove handlers). */
+		var sizeOptions   = [];
 		/** Whether we are editing an existing node. */
-		var editingNode    = null;
+		var editingNode   = null;
 
 		/* ---------------------------------------------------------------- */
 		/*  Toolbar button                                                   */
 		/* ---------------------------------------------------------------- */
 
 		editor.addButton( 'mavo_picture', {
-			title : i18n.buttonTitle,
+			title : i18n.buttonTitle || 'Insert Picture Tag',
 			image : ICON_SVG,
 			onclick: function () {
 				if ( editingNode ) {
@@ -74,14 +70,16 @@
 		/* ---------------------------------------------------------------- */
 
 		editor.on( 'NodeChange', function ( e ) {
-			var node   = e.element;
-			var pic    = findPictureAncestor( node );
-			var btn    = editor.buttons && editor.buttons.mavo_picture;
+			var node = e.element;
+			var pic  = findPictureAncestor( node );
+			var btn  = editor.buttons && editor.buttons.mavo_picture;
 
 			editingNode = pic || null;
 
 			if ( btn ) {
-				btn.title = pic ? i18n.buttonTitleEdit : i18n.buttonTitle;
+				btn.title = pic
+					? ( i18n.buttonTitleEdit || 'Edit Picture Tag' )
+					: ( i18n.buttonTitle     || 'Insert Picture Tag' );
 			}
 		} );
 
@@ -91,15 +89,15 @@
 
 		function openMediaLibrary( prefillAttachmentId ) {
 			var frame = wp.media( {
-				title    : i18n.mediaTitle,
-				button   : { text: i18n.mediaButton },
+				title    : i18n.mediaTitle   || 'Select Image',
+				button   : { text: i18n.mediaButton || 'Use this image' },
 				multiple : false,
 				library  : { type: 'image' }
 			} );
 
 			if ( prefillAttachmentId ) {
 				frame.on( 'open', function () {
-					var selection = frame.state().get( 'selection' );
+					var selection  = frame.state().get( 'selection' );
 					var attachment = wp.media.attachment( prefillAttachmentId );
 					attachment.fetch();
 					selection.add( attachment );
@@ -129,15 +127,9 @@
 					nonce         : mavoPicture.nonce
 				},
 				function ( response ) {
-					if ( response.success ) {
-						callback( response.data.sizes );
-					} else {
-						callback( {} );
-					}
+					callback( response.success ? response.data.sizes : {} );
 				}
-			).fail( function () {
-				callback( {} );
-			} );
+			).fail( function () { callback( {} ); } );
 		}
 
 		/* ---------------------------------------------------------------- */
@@ -145,281 +137,291 @@
 		/* ---------------------------------------------------------------- */
 
 		/**
-		 * Build and open the TinyMCE 4 dialog.
+		 * Build and open the custom jQuery overlay dialog.
+		 * Uses the same #mavo-qt-* structure as mavo-quicktags.js so that
+		 * the shared CSS (output via admin_head) handles all styling.
 		 *
-		 * @param {Object}      attachment  wp.media attachment JSON.
-		 * @param {Object}      sizes       AJAX sizes response.
-		 * @param {HTMLElement|null} existingNode  Existing <picture>/<figure> for edit mode.
+		 * @param {Object}           attachment   wp.media attachment JSON.
+		 * @param {Object}           sizes        AJAX sizes response.
+		 * @param {HTMLElement|null} existingNode Existing <picture>/<figure> for edit.
 		 */
 		function openDialog( attachment, sizes, existingNode ) {
 			currentAttach = attachment;
 			currentSizes  = sizes;
 			sourceRows    = [];
 
-			var sizeNames  = Object.keys( sizes );
+			var sizeNames = Object.keys( sizes );
 			if ( ! sizeNames.length ) {
-				editor.windowManager.alert( i18n.noSizes );
+				// eslint-disable-next-line no-alert
+				window.alert( i18n.noSizes || 'No sizes found for this attachment.' );
 				return;
 			}
 
-			/* Build <select> options list for image sizes. */
-			var sizeOptions = sizeNames.map( function ( key ) {
-				return { text: sizes[ key ].label, value: key };
+			sizeOptions = sizeNames.map( function ( k ) {
+				return { value: k, text: sizes[ k ].label };
 			} );
 
-			/* Auto-select default sources: up to 3 largest non-full sizes. */
-			var defaultSources = sizeNames
-				.filter( function ( k ) { return k !== 'full'; } )
-				.slice( 0, 3 );
-
-			/* If editing, parse existing sources from the DOM. */
+			/* Parse existing node (edit mode) or set up defaults (insert mode). */
 			var prefill = existingNode ? parsePictureNode( existingNode, sizes ) : null;
 
-			/* Build the initial source rows HTML. */
-			var sourcesToRender = prefill ? prefill.sources : defaultSources.map( function ( k, idx ) {
-				var breakpoints = [ 960, 768, 480 ];
-				return { sizeName: k, minWidth: breakpoints[ idx ] || ( 480 - idx * 100 ) };
-			} );
+			var defaultSources = sizeNames
+				.filter( function ( k ) { return k !== 'full'; } )
+				.slice( 0, 3 )
+				.map( function ( k, idx ) {
+					return { sizeName: k, minWidth: [ 960, 768, 480 ][ idx ] || ( 480 - idx * 100 ) };
+				} );
 
-			var sourcesHtml = buildSourceRowsHtml( sourcesToRender, sizeOptions, sizes );
+			var sourcesToRender = prefill ? prefill.sources : defaultSources;
+			sourceRows = sourcesToRender.slice();
 
-			/* Fallback img size: prefer 'large' or size closest to 960px. */
 			var fallbackSize = prefill
 				? prefill.fallbackSize
 				: pickDefaultFallback( sizes, sizeNames );
 
-			/* Build the fallback <select> options with the correct default. */
-			var fallbackOpts = sizeOptions.map( function ( o ) {
+			var initAlt     = prefill ? prefill.alt     : ( attachment.alt || attachment.title || '' );
+			var initCaption = prefill ? ( prefill.caption || '' ) : '';
+			var initLazy    = prefill ? prefill.lazy    : true;
+			var initFigure  = prefill ? prefill.useFigure : true;
+
+			var $overlay = buildModal(
+				attachment, sizes,
+				sourcesToRender, fallbackSize,
+				initAlt, initCaption, initLazy, initFigure
+			);
+
+			$( 'body' ).append( $overlay );
+			bindModalEvents( $overlay, sizes, existingNode );
+		}
+
+		/* ---------------------------------------------------------------- */
+		/*  Build modal HTML                                                 */
+		/* ---------------------------------------------------------------- */
+
+		function buildModal( attachment, sizes, sourcesToRender, fallbackSize, initAlt, initCaption, initLazy, initFigure ) {
+
+			var selectOpts = sizeOptions.map( function ( o ) {
 				return '<option value="' + esc( o.value ) + '"' +
 					( o.value === fallbackSize ? ' selected' : '' ) +
 					'>' + esc( o.text ) + '</option>';
 			} ).join( '' );
 
-			/* Build the entire dialog as a single HTML string.
-			   This avoids TinyMCE 4's broken absolute-layout footer (which
-			   overlaps the content with height:'auto') and the white-on-white
-			   primary button caused by our .mce-container background reset. */
-			var dialogHtml =
+			var sourcesHtml = sourcesToRender.map( function ( row ) {
+				return buildSourceRowHtml( row, sizes );
+			} ).join( '' );
+
+			var html =
+				'<div id="mavo-qt-overlay" role="dialog" aria-modal="true">' +
+				'<div id="mavo-qt-dialog">' +
+
+				/* Header */
+				'<div id="mavo-qt-header">' +
+				'<h3 style="margin:0;font-size:14px;">' + esc( i18n.dialogTitle || 'Insert Picture Tag' ) + '</h3>' +
+				'<button id="mavo-qt-close" type="button" aria-label="Close" ' +
+				'        style="background:none;border:none;font-size:20px;cursor:pointer;line-height:1;padding:0;">×</button>' +
+				'</div>' +
+
+				/* Body */
+				'<div id="mavo-qt-body">' +
+
 				/* Image preview + change button */
 				'<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
-				'<img id="mavo-preview" src="' + esc( attachment.url ) + '" ' +
+				'<img id="mavo-qt-preview" src="' + esc( attachment.url ) + '" ' +
 				'     style="max-width:80px;max-height:60px;object-fit:contain;border:1px solid #ddd;border-radius:3px;">' +
-				'<button type="button" id="mavo-change-img" class="button">' + esc( i18n.changeImg ) + '</button>' +
+				'<button type="button" id="mavo-qt-change-img" class="button">' +
+				esc( i18n.changeImg || 'Change Image' ) + '</button>' +
 				'</div>' +
+
 				/* Alt text */
 				'<label style="display:block;margin-bottom:10px;">' +
 				'<span style="display:block;font-weight:600;margin-bottom:3px;">Alt text</span>' +
-				'<input type="text" id="mavo-alt" value="' +
-				esc( prefill ? prefill.alt : ( attachment.alt || attachment.title || '' ) ) +
+				'<input type="text" id="mavo-qt-alt" value="' + esc( initAlt ) +
 				'" style="width:100%;box-sizing:border-box;">' +
 				'</label>' +
-				/* Responsive sources */
+
+				/* Sources */
 				'<p style="margin:0 0 4px;font-weight:600;">Responsive sources ' +
 				'<span style="font-weight:400;font-size:11px;color:#666;">(largest breakpoint first)</span></p>' +
-				'<div id="mavo-sources-wrap" style="margin-bottom:4px;">' + sourcesHtml + '</div>' +
+				'<div id="mavo-qt-sources-wrap" style="margin-bottom:4px;">' + sourcesHtml + '</div>' +
 				'<div style="display:flex;gap:8px;margin-bottom:12px;">' +
-				'<button type="button" id="mavo-add-source" class="button button-small">' + esc( i18n.addSource ) + '</button>' +
-				'<button type="button" id="mavo-remove-source" class="button button-small">' + esc( i18n.removeSource ) + '</button>' +
+				'<button type="button" id="mavo-qt-add-source" class="button button-small">' +
+				esc( i18n.addSource || '+ Add source' ) + '</button>' +
+				'<button type="button" id="mavo-qt-remove-source" class="button button-small">' +
+				esc( i18n.removeSource || '− Remove last' ) + '</button>' +
 				'</div>' +
+
 				/* Fallback size */
 				'<label style="display:block;margin-bottom:10px;">' +
 				'<span style="display:block;font-weight:600;margin-bottom:3px;">Fallback &lt;img&gt; size</span>' +
-				'<select id="mavo-fallback" style="width:100%;">' + fallbackOpts + '</select>' +
+				'<select id="mavo-qt-fallback" style="width:100%;">' + selectOpts + '</select>' +
 				'</label>' +
+
 				/* Options */
 				'<div style="display:flex;gap:24px;margin-bottom:10px;">' +
-				'<label><input type="checkbox" id="mavo-lazy"' +
-				( ( prefill && ! prefill.lazy ) ? '' : ' checked' ) + '> Lazy loading</label>' +
-				'<label><input type="checkbox" id="mavo-figure"' +
-				( ( prefill && ! prefill.useFigure ) ? '' : ' checked' ) + '> Wrap in &lt;figure&gt;</label>' +
+				'<label><input type="checkbox" id="mavo-qt-lazy"' + ( initLazy ? ' checked' : '' ) + '> Lazy loading</label>' +
+				'<label><input type="checkbox" id="mavo-qt-figure"' + ( initFigure ? ' checked' : '' ) + '> Wrap in &lt;figure&gt;</label>' +
 				'</div>' +
+
 				/* Caption */
-				'<label style="display:block;margin-bottom:16px;">' +
+				'<label style="display:block;margin-bottom:0;">' +
 				'<span style="display:block;font-weight:600;margin-bottom:3px;">Caption</span>' +
-				'<input type="text" id="mavo-caption" value="' +
-				esc( prefill ? ( prefill.caption || '' ) : '' ) +
+				'<input type="text" id="mavo-qt-caption" value="' + esc( initCaption ) +
 				'" style="width:100%;box-sizing:border-box;">' +
 				'</label>' +
-				/* Footer buttons – rendered inside the body so TinyMCE's
-				   absolute-positioned footer bar is never used. */
-				'<div style="display:flex;justify-content:flex-end;gap:8px;' +
-				'            border-top:1px solid #ddd;padding-top:12px;">' +
-				'<button type="button" id="mavo-cancel-btn" class="button">' + esc( i18n.cancelBtn ) + '</button>' +
-				'<button type="button" id="mavo-insert-btn" class="button button-primary">' + esc( i18n.insertBtn ) + '</button>' +
-				'</div>';
 
-			/* Open dialog ------------------------------------------------- */
-			dialogWin = editor.windowManager.open( {
-				title  : i18n.dialogTitle,
-				width  : 560,
-				body   : [ { type: 'container', html: dialogHtml } ],
-				onopen: function () {
-					var $body = $( 'div[role="dialog"]:visible' );
+				'</div>' + /* end #mavo-qt-body */
 
-					/* TinyMCE 4 sanitises container HTML and strips the
-					   'selected' attribute from <option> elements. Set the
-					   fallback select value programmatically instead. */
-					$body.find( '#mavo-fallback' ).val( fallbackSize );
+				/* Footer */
+				'<div id="mavo-qt-footer">' +
+				'<button type="button" class="button mavo-qt-cancel">' +
+				esc( i18n.cancelBtn || 'Cancel' ) + '</button>' +
+				'<button type="button" class="button button-primary" id="mavo-qt-insert">' +
+				esc( i18n.insertBtn || 'Insert Picture' ) + '</button>' +
+				'</div>' +
 
-					bindDialogEvents( sizeOptions, sizes, $body );
-					sourceRows = sourcesToRender.map( function ( s ) {
-						return { sizeName: s.sizeName, minWidth: s.minWidth };
-					} );
-				}
-			} );
+				'</div>' + /* end #mavo-qt-dialog */
+				'</div>';  /* end #mavo-qt-overlay */
+
+			return $( html );
 		}
 
 		/* ---------------------------------------------------------------- */
-		/*  Dialog event bindings                                            */
+		/*  Modal event bindings                                             */
 		/* ---------------------------------------------------------------- */
 
-		function bindDialogEvents( sizeOptions, sizes, $body ) {
+		function bindModalEvents( $overlay, sizes, existingNode ) {
 
-			/* Cancel button. */
-			$body.on( 'click', '#mavo-cancel-btn', function () {
-				dialogWin.close();
+			/* Close on backdrop click or × button. */
+			$overlay.on( 'click', '#mavo-qt-overlay', function ( e ) {
+				if ( $( e.target ).is( '#mavo-qt-overlay' ) ) { $overlay.remove(); }
+			} );
+			$overlay.on( 'click', '#mavo-qt-close, .mavo-qt-cancel', function () {
+				$overlay.remove();
 			} );
 
-			/* Insert button. */
-			$body.on( 'click', '#mavo-insert-btn', function () {
-				onInsert( $body );
-			} );
-
-			/* Change image button. */
-			$body.on( 'click', '#mavo-change-img', function () {
-				dialogWin.close();
+			/* Change image. */
+			$overlay.on( 'click', '#mavo-qt-change-img', function () {
+				$overlay.remove();
 				openMediaLibrary( currentAttach && currentAttach.id );
 			} );
 
 			/* Add source row. */
-			$body.on( 'click', '#mavo-add-source', function () {
+			$overlay.on( 'click', '#mavo-qt-add-source', function () {
 				var nextWidth = 320;
 				if ( sourceRows.length ) {
-					var last = sourceRows[ sourceRows.length - 1 ].minWidth;
-					nextWidth = Math.max( 100, last - 160 );
+					nextWidth = Math.max( 100, sourceRows[ sourceRows.length - 1 ].minWidth - 160 );
 				}
-				var newRow = { sizeName: sizeOptions[ sizeOptions.length - 1 ].value, minWidth: nextWidth };
-				sourceRows.push( newRow );
-				$body.find( '#mavo-sources-wrap' ).append( buildSourceRowHtml( newRow, sizeOptions, sizes, sourceRows.length - 1 ) );
+				var row = { sizeName: sizeOptions[ sizeOptions.length - 1 ].value, minWidth: nextWidth };
+				sourceRows.push( row );
+				$overlay.find( '#mavo-qt-sources-wrap' ).append( buildSourceRowHtml( row, sizes ) );
 			} );
 
 			/* Remove last source row. */
-			$body.on( 'click', '#mavo-remove-source', function () {
-				if ( sourceRows.length <= 1 ) return;
+			$overlay.on( 'click', '#mavo-qt-remove-source', function () {
+				if ( sourceRows.length <= 1 ) { return; }
 				sourceRows.pop();
-				$body.find( '.mavo-source-row' ).last().remove();
+				$overlay.find( '.mavo-qt-source-row' ).last().remove();
+			} );
+
+			/* Insert. */
+			$overlay.on( 'click', '#mavo-qt-insert', function () {
+				var sources = [];
+				$overlay.find( '.mavo-qt-source-row' ).each( function () {
+					var minWidth = parseInt( $( this ).find( '.mavo-qt-bp-width' ).val(), 10 ) || 0;
+					var sizeName = $( this ).find( '.mavo-qt-bp-size' ).val();
+					if ( sizeName && minWidth > 0 ) {
+						sources.push( { sizeName: sizeName, minWidth: minWidth } );
+					}
+				} );
+				sources.sort( function ( a, b ) { return b.minWidth - a.minWidth; } );
+
+				var html = buildPictureHTML( {
+					sources      : sources,
+					sizes        : currentSizes,
+					fallbackSize : $overlay.find( '#mavo-qt-fallback' ).val(),
+					alt          : $overlay.find( '#mavo-qt-alt' ).val(),
+					caption      : $overlay.find( '#mavo-qt-caption' ).val(),
+					lazy         : $overlay.find( '#mavo-qt-lazy' ).is( ':checked' ),
+					useFigure    : $overlay.find( '#mavo-qt-figure' ).is( ':checked' )
+				} );
+
+				$overlay.remove();
+
+				if ( existingNode ) {
+					$( existingNode ).replaceWith( html );
+					editor.fire( 'change' );
+					editingNode = null;
+				} else {
+					editor.insertContent( html );
+				}
 			} );
 		}
 
 		/* ---------------------------------------------------------------- */
-		/*  Collect dialog values and insert HTML                            */
+		/*  Source row HTML                                                  */
 		/* ---------------------------------------------------------------- */
 
-		function onInsert( $dlg ) {
-			/* Collect source rows entirely from the DOM — no win.toJSON() needed
-			   since all inputs are now plain HTML elements. */
-			var sources = [];
-			$dlg.find( '.mavo-source-row' ).each( function () {
-				var $row     = $( this );
-				var minWidth = parseInt( $row.find( '.mavo-bp-width' ).val(), 10 ) || 0;
-				var sizeName = $row.find( '.mavo-bp-size' ).val();
-				if ( sizeName && minWidth > 0 ) {
-					sources.push( { sizeName: sizeName, minWidth: minWidth } );
-				}
-			} );
+		function buildSourceRowHtml( row, sizes ) {
+			var selectHtml = sizeOptions.map( function ( opt ) {
+				return '<option value="' + esc( opt.value ) + '"' +
+					( opt.value === row.sizeName ? ' selected' : '' ) +
+					'>' + esc( opt.text ) + '</option>';
+			} ).join( '' );
 
-			sources.sort( function ( a, b ) { return b.minWidth - a.minWidth; } );
+			var hasWebp = row.sizeName && sizes[ row.sizeName ] && sizes[ row.sizeName ].webp;
+			var dot = hasWebp
+				? '<span title="WebP available" style="color:#4caf50;font-size:16px;">●</span>'
+				: '<span title="No WebP found"  style="color:#ccc;font-size:16px;">●</span>';
 
-			var html = buildPictureHTML( {
-				sources      : sources,
-				sizes        : currentSizes,
-				fallbackSize : $dlg.find( '#mavo-fallback' ).val(),
-				alt          : $dlg.find( '#mavo-alt' ).val() || '',
-				caption      : $dlg.find( '#mavo-caption' ).val() || '',
-				lazy         : $dlg.find( '#mavo-lazy' ).is( ':checked' ),
-				useFigure    : $dlg.find( '#mavo-figure' ).is( ':checked' )
-			} );
-
-			dialogWin.close();
-
-			if ( editingNode ) {
-				$( editingNode ).replaceWith( html );
-				editor.fire( 'change' );
-			} else {
-				editor.insertContent( html );
-			}
-
-			editingNode = null;
+			return (
+				'<div class="mavo-qt-source-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+				'<span style="font-size:12px;color:#666;">≥</span>' +
+				'<input class="mavo-qt-bp-width" type="number" value="' + ( row.minWidth || 960 ) +
+				'" min="1" max="9999" style="width:70px;" title="Min viewport width (px)">' +
+				'<span style="font-size:12px;color:#666;">px →</span>' +
+				'<select class="mavo-qt-bp-size" style="flex:1;">' + selectHtml + '</select>' +
+				dot +
+				'</div>'
+			);
 		}
 
 		/* ---------------------------------------------------------------- */
 		/*  HTML builder                                                     */
 		/* ---------------------------------------------------------------- */
 
-		/**
-		 * Build the final <picture> markup.
-		 *
-		 * @param {Object} opts
-		 * @param {Array}  opts.sources       [{sizeName, minWidth}] sorted desc.
-		 * @param {Object} opts.sizes         AJAX sizes map.
-		 * @param {string} opts.fallbackSize  Key in sizes to use for <img>.
-		 * @param {string} opts.alt
-		 * @param {string} opts.caption
-		 * @param {boolean} opts.lazy
-		 * @param {boolean} opts.useFigure
-		 */
 		function buildPictureHTML( opts ) {
 			var lines  = [];
 			var indent = opts.useFigure ? '\t\t' : '\t';
 
-			lines.push( opts.useFigure ? '<figure class="wp-picture-figure">' : '' );
+			if ( opts.useFigure ) { lines.push( '<figure class="wp-picture-figure">' ); }
 			lines.push( ( opts.useFigure ? '\t' : '' ) + '<picture>' );
 
-			/* Full-size URL sentinel: skip any source that resolved to the
-			   original file (WordPress silent fallback when no resized file
-			   exists). The JS comparison is immune to CDN / caching variance
-			   that breaks server-side checks like $src[3] or metadata lookups. */
+			/* Skip any source whose URL resolves to the full-size file
+			   (WordPress silent fallback when no resized copy exists). */
 			var fullUrl = opts.sizes['full'] ? opts.sizes['full'].url : null;
 
 			opts.sources.forEach( function ( s ) {
 				var sizeData = opts.sizes[ s.sizeName ];
-				if ( ! sizeData ) return;
-				if ( fullUrl && sizeData.url === fullUrl ) return;
+				if ( ! sizeData ) { return; }
+				if ( fullUrl && sizeData.url === fullUrl ) { return; }
 
 				var media = '(min-width: ' + s.minWidth + 'px)';
 
-				/* WebP source first (if available). */
 				if ( sizeData.webp ) {
-					lines.push(
-						indent +
-						'<source type="image/webp"' +
-						' media="' + media + '"' +
-						' srcset="' + esc( sizeData.webp ) + '">'
-					);
+					lines.push( indent + '<source type="image/webp" media="' + media + '" srcset="' + esc( sizeData.webp ) + '">' );
 				}
-
-				/* JPEG/PNG source. */
-				lines.push(
-					indent +
-					'<source' +
-					' media="' + media + '"' +
-					' srcset="' + esc( sizeData.url ) + '">'
-				);
+				lines.push( indent + '<source media="' + media + '" srcset="' + esc( sizeData.url ) + '">' );
 			} );
 
-			/* Fallback <img>. */
 			var fallback = opts.sizes[ opts.fallbackSize ] || Object.values( opts.sizes ).pop();
 			if ( fallback ) {
-				var imgAttrs = [
-					'src="' + esc( fallback.url ) + '"',
-					'alt="' + esc( opts.alt ) + '"',
-					'width="' + fallback.width + '"',
-					'height="' + fallback.height + '"'
+				var attrs = [
+					'src="'    + esc( fallback.url )    + '"',
+					'alt="'    + esc( opts.alt )        + '"',
+					'width="'  + fallback.width         + '"',
+					'height="' + fallback.height        + '"'
 				];
-				if ( opts.lazy ) {
-					imgAttrs.push( 'loading="lazy"' );
-				}
-				lines.push( indent + '<img ' + imgAttrs.join( ' ' ) + '>' );
+				if ( opts.lazy ) { attrs.push( 'loading="lazy"' ); }
+				lines.push( indent + '<img ' + attrs.join( ' ' ) + '>' );
 			}
 
 			lines.push( ( opts.useFigure ? '\t' : '' ) + '</picture>' );
@@ -427,12 +429,9 @@
 			if ( opts.useFigure && opts.caption ) {
 				lines.push( '\t<figcaption>' + esc( opts.caption ) + '</figcaption>' );
 			}
+			if ( opts.useFigure ) { lines.push( '</figure>' ); }
 
-			if ( opts.useFigure ) {
-				lines.push( '</figure>' );
-			}
-
-			return lines.filter( function ( l ) { return l !== ''; } ).join( '\n' );
+			return lines.join( '\n' );
 		}
 
 		/* ---------------------------------------------------------------- */
@@ -440,19 +439,9 @@
 		/* ---------------------------------------------------------------- */
 
 		function reopenForEdit( node ) {
-			/* Try to extract the attachment ID from the fallback <img> src. */
-			var $pic    = $( node ).is( 'picture' ) ? $( node ) : $( node ).find( 'picture' );
-			var imgSrc  = $pic.find( 'img' ).attr( 'src' ) || '';
-
-			/* We don't have the attachment ID directly; show media library
-			   pre-open on the current image so the user confirms/changes it. */
-			var parsed = parsePictureNode( node );
-
-			/* Fetch sizes for the attachment. We need the attachment ID.
-			   As a fallback we open the media library with an explanatory title. */
 			var frame = wp.media( {
-				title    : i18n.buttonTitleEdit,
-				button   : { text: i18n.mediaButton },
+				title    : i18n.buttonTitleEdit || 'Edit Picture Tag',
+				button   : { text: i18n.mediaButton || 'Use this image' },
 				multiple : false,
 				library  : { type: 'image' }
 			} );
@@ -469,9 +458,6 @@
 
 		/**
 		 * Parse an existing <picture> (or its <figure>) into dialog prefill data.
-		 *
-		 * @param {HTMLElement} node
-		 * @param {Object}      [sizes]  Optional sizes map to match URLs.
 		 */
 		function parsePictureNode( node, sizes ) {
 			var $node    = $( node );
@@ -479,26 +465,24 @@
 			var $img     = $pic.find( 'img' ).first();
 			var $sources = $pic.find( 'source' );
 
-			var alt        = $img.attr( 'alt' ) || '';
-			var lazy       = $img.attr( 'loading' ) === 'lazy';
-			var useFigure  = $node.is( 'figure' );
-			var caption    = useFigure ? $node.find( 'figcaption' ).text() : '';
-			var fallbackSrc= $img.attr( 'src' ) || '';
+			var alt       = $img.attr( 'alt' )     || '';
+			var lazy      = $img.attr( 'loading' ) === 'lazy';
+			var useFigure = $node.is( 'figure' );
+			var caption   = useFigure ? $node.find( 'figcaption' ).text() : '';
 
-			/* Build sources list: pair WebP + non-WebP sources by media query. */
 			var seenMedia = {};
 			$sources.each( function () {
-				var $src    = $( this );
-				var media   = $src.attr( 'media' ) || '';
-				var type    = $src.attr( 'type' ) || '';
-				var isWebP  = type === 'image/webp';
-				var minW    = parseInt( ( media.match( /min-width:\s*(\d+)/ ) || [] )[ 1 ], 10 ) || 0;
+				var $src   = $( this );
+				var media  = $src.attr( 'media' ) || '';
+				var type   = $src.attr( 'type' )  || '';
+				var isWebP = ( type === 'image/webp' );
+				var minW   = parseInt( ( media.match( /min-width:\s*(\d+)/ ) || [] )[ 1 ], 10 ) || 0;
 
-				if ( ! isWebP ) {
-					// Non-webp source defines a row.
-					if ( ! seenMedia[ minW ] ) {
-						seenMedia[ minW ] = { minWidth: minW, sizeName: matchSizeByUrl( $src.attr( 'srcset' ), sizes ) };
-					}
+				if ( ! isWebP && ! seenMedia[ minW ] ) {
+					seenMedia[ minW ] = {
+						minWidth : minW,
+						sizeName : matchSizeByUrl( $src.attr( 'srcset' ), sizes )
+					};
 				}
 			} );
 
@@ -512,13 +496,12 @@
 				useFigure    : useFigure,
 				caption      : caption,
 				sources      : parsedSources.length ? parsedSources : [ { minWidth: 960, sizeName: '' } ],
-				fallbackSize : matchSizeByUrl( fallbackSrc, sizes )
+				fallbackSize : matchSizeByUrl( $img.attr( 'src' ) || '', sizes )
 			};
 		}
 
-		/** Find the size key whose URL matches a given src string. */
 		function matchSizeByUrl( url, sizes ) {
-			if ( ! url || ! sizes ) return '';
+			if ( ! url || ! sizes ) { return ''; }
 			var found = Object.keys( sizes ).find( function ( k ) {
 				return sizes[ k ].url === url;
 			} );
@@ -526,67 +509,13 @@
 		}
 
 		/* ---------------------------------------------------------------- */
-		/*  DOM helpers                                                      */
-		/* ---------------------------------------------------------------- */
-
-		/** Walk up the DOM to find an ancestor that is <picture> or <figure> with <picture>. */
-		function findPictureAncestor( node ) {
-			while ( node && node.nodeName !== 'BODY' ) {
-				if ( node.nodeName === 'PICTURE' ) return node;
-				if ( node.nodeName === 'FIGURE' && node.querySelector( 'picture' ) ) return node;
-				node = node.parentNode;
-			}
-			return null;
-		}
-
-		/* ---------------------------------------------------------------- */
-		/*  Source row HTML                                                  */
-		/* ---------------------------------------------------------------- */
-
-		function buildSourceRowsHtml( rows, sizeOptions, sizes ) {
-			return rows.map( function ( row, idx ) {
-				return buildSourceRowHtml( row, sizeOptions, sizes, idx );
-			} ).join( '' );
-		}
-
-		function buildSourceRowHtml( row, sizeOptions, sizes, idx ) {
-			var selectHtml = sizeOptions.map( function ( opt ) {
-				return '<option value="' + esc( opt.value ) + '"' +
-					( opt.value === row.sizeName ? ' selected' : '' ) +
-					'>' + esc( opt.text ) + '</option>';
-			} ).join( '' );
-
-			/* Indicator dot: green if this size has WebP, grey if not. */
-			var hasWebp = row.sizeName && sizes[ row.sizeName ] && sizes[ row.sizeName ].webp;
-			var dot = hasWebp
-				? '<span title="WebP available" style="color:#4caf50;font-size:16px;">●</span>'
-				: '<span title="No WebP found"  style="color:#ccc;font-size:16px;">●</span>';
-
-			return (
-				'<div class="mavo-source-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
-				'  <span style="font-size:12px;color:#666;">≥</span>' +
-				'  <input class="mavo-bp-width" type="number" value="' + ( row.minWidth || 960 ) + '" min="1" max="9999"' +
-				'         style="width:70px;" title="Min viewport width (px)">' +
-				'  <span style="font-size:12px;color:#666;">px →</span>' +
-				'  <select class="mavo-bp-size" style="flex:1;">' + selectHtml + '</select>' +
-				'  ' + dot +
-				'</div>'
-			);
-		}
-
-		/* ---------------------------------------------------------------- */
 		/*  Default fallback size selection                                  */
 		/* ---------------------------------------------------------------- */
 
-		/**
-		 * Pick the best default fallback <img> size.
-		 * Prefers the 'large' key; otherwise the size whose width is
-		 * closest to 960 px; finally the smallest non-full size.
-		 */
 		function pickDefaultFallback( sizes, sizeNames ) {
 			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
-			if ( ! nonFull.length ) return sizeNames[ 0 ] || '';
-			if ( sizes.large ) return 'large';
+			if ( ! nonFull.length ) { return sizeNames[ 0 ] || ''; }
+			if ( sizes.large ) { return 'large'; }
 			var target = 960;
 			return nonFull.reduce( function ( best, curr ) {
 				return Math.abs( sizes[ curr ].width - target ) <
@@ -595,7 +524,20 @@
 		}
 
 		/* ---------------------------------------------------------------- */
-		/*  Tiny HTML escaping utility                                       */
+		/*  DOM helpers                                                      */
+		/* ---------------------------------------------------------------- */
+
+		function findPictureAncestor( node ) {
+			while ( node && node.nodeName !== 'BODY' ) {
+				if ( node.nodeName === 'PICTURE' ) { return node; }
+				if ( node.nodeName === 'FIGURE' && node.querySelector( 'picture' ) ) { return node; }
+				node = node.parentNode;
+			}
+			return null;
+		}
+
+		/* ---------------------------------------------------------------- */
+		/*  HTML escaping                                                    */
 		/* ---------------------------------------------------------------- */
 
 		function esc( str ) {
@@ -605,6 +547,7 @@
 				.replace( /</g, '&lt;' )
 				.replace( />/g, '&gt;' );
 		}
+
 	} );
 
 } )( jQuery, ( typeof mavoPicture !== 'undefined' && mavoPicture.i18n ) ? mavoPicture.i18n : {} );
