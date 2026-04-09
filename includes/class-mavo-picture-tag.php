@@ -86,6 +86,7 @@ class Mavo_Picture_Tag {
 
 		add_filter( 'mce_buttons',           [ $this, 'add_tinymce_button' ] );
 		add_filter( 'mce_external_plugins',  [ $this, 'register_tinymce_plugin' ] );
+		add_filter( 'tiny_mce_before_init',  [ $this, 'allow_picture_source' ] );
 	}
 
 	/** Append the button name to TinyMCE toolbar row 1. */
@@ -98,6 +99,19 @@ class Mavo_Picture_Tag {
 	public function register_tinymce_plugin( array $plugins ): array {
 		$plugins['mavo_picture'] = MAVO_PICTURE_TAG_URL . 'js/mavo-picture-plugin.js?ver=' . MAVO_PICTURE_TAG_VERSION;
 		return $plugins;
+	}
+
+	/**
+	 * Allow <source> elements (with their attributes) inside TinyMCE.
+	 * Without this, TinyMCE 4 silently strips every <source> child of
+	 * <picture> when content is inserted via editor.insertContent().
+	 */
+	public function allow_picture_source( array $init ): array {
+		$extra = 'source[srcset|type|media|sizes]';
+		$init['extended_valid_elements'] = isset( $init['extended_valid_elements'] )
+			? $init['extended_valid_elements'] . ',' . $extra
+			: $extra;
+		return $init;
 	}
 
 	/* ------------------------------------------------------------------ */
