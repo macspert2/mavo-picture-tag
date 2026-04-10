@@ -175,9 +175,8 @@
 
 			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
 			var defaultSources = [
-				{ sizeName: nonFull[ 0 ], minWidth: 960 },
-				{ sizeName: nonFull[ 2 ], minWidth: 480 },
-				{ sizeName: nonFull[ 4 ], minWidth: 320 }
+				{ sizeName: nonFull[ 0 ], minWidth: 640 },
+				{ sizeName: nonFull[ 2 ], minWidth: 480 }
 			].filter( function ( s ) { return s.sizeName; } );
 
 			var sourcesToRender = prefill ? prefill.sources : defaultSources;
@@ -436,6 +435,12 @@
 
 			var fallback = opts.sizes[ opts.fallbackSize ] || Object.values( opts.sizes ).pop();
 			if ( fallback ) {
+				/* Bare WebP source (no media query) catches all viewports not
+				   matched above and serves WebP to capable browsers, while the
+				   <img> below remains the JPEG fallback for everyone else. */
+				if ( fallback.webp ) {
+					lines.push( indent + '<source type="image/webp" srcset="' + esc( fallback.webp ) + '">' );
+				}
 				var attrs = [
 					'src="'    + esc( fallback.url )    + '"',
 					'alt="'    + esc( opts.alt )        + '"',
