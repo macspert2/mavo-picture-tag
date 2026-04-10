@@ -249,9 +249,9 @@ class Mavo_Picture_Tag {
 		$full_file = $meta['file'] ?? '';                     // e.g. "2026/03/IMG_1987.jpeg"
 		$sub_dir   = $full_file ? dirname( $full_file ) : ''; // e.g. "2026/03"
 
-		// Build URLs directly from metadata filenames to bypass any CDN
-		// (e.g. Jetpack PhotoCDN) that may rewrite wp_get_attachment_image_src()
-		// URLs to a single origin URL for all sizes.
+		// Strategy 1: read sizes from attachment metadata (most reliable when available).
+		// Builds URLs from stored filenames to bypass CDN filters (e.g. Jetpack PhotoCDN)
+		// that may rewrite wp_get_attachment_image_src() to the same origin URL for all sizes.
 		foreach ( $meta['sizes'] ?? [] as $size_name => $size_meta ) {
 			$rel = '/' . $sub_dir . '/' . $size_meta['file'];  // "/2026/03/IMG_1987-480x360.jpeg"
 			$sizes[ $size_name ] = [
@@ -262,6 +262,34 @@ class Mavo_Picture_Tag {
 				'label'  => ucfirst( str_replace( '-', ' ', $size_name ) )
 					. ' (' . $size_meta['width'] . '×' . $size_meta['height'] . ')',
 			];
+		}
+
+		// Strategy 2: filesystem scan fallback for images whose intermediate sizes were
+		// not recorded in WP metadata (e.g. uploaded via FTP, or resized by a plugin
+		// that doesn't write to wp_postmeta).  Looks for basename-WxH.ext files on disk.
+		if ( empty( $sizes ) && $full_file ) {
+			$base_name = pathinfo( $full_file, PATHINFO_FILENAME ); // "IMG_1987"
+			$ext       = pathinfo( $full_file, PATHINFO_EXTENSION ); // "jpeg"
+			$abs_dir   = $base_dir . '/' . $sub_dir;
+			$pattern   = $abs_dir . '/' . $base_name . '-[0-9]*x[0-9]*.' . $ext;
+
+			foreach ( glob( $pattern ) ?: [] as $file_path ) {
+				$filename = basename( $file_path );
+				if ( ! preg_match( '/-(\d+)x(\d+)\.' . preg_quote( $ext, '/' ) . '$/', $filename, $m ) ) {
+					continue;
+				}
+				$w         = (int) $m[1];
+				$h         = (int) $m[2];
+				$size_name = $w . 'x' . $h;
+				$rel       = '/' . $sub_dir . '/' . $filename;
+				$sizes[ $size_name ] = [
+					'url'    => $base_url . $rel,
+					'width'  => $w,
+					'height' => $h,
+					'webp'   => $this->get_webp_url( $size_name, $meta, $base_url, $base_dir, $rel ),
+					'label'  => $w . '×' . $h . 'px',
+				];
+			}
 		}
 
 		// Full (original) size.
