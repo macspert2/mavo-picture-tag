@@ -187,9 +187,8 @@
 				}, nonFull[ 0 ] );
 			};
 			var defaultSources = [
-				{ sizeName: 'full',             minWidth: 960 },
-				{ sizeName: closestSize( 640 ), minWidth: 640 },
-				{ sizeName: closestSize( 480 ), minWidth: 480 }
+				{ sizeName: 'full',             minWidth: 640 },
+				{ sizeName: closestSize( 640 ), minWidth: 480 }
 			].filter( function ( s ) { return s.sizeName && sizes[ s.sizeName ]; } );
 
 			var sourcesToRender = prefill ? prefill.sources : defaultSources;
