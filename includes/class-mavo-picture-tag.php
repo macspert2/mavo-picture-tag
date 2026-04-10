@@ -238,37 +238,41 @@ class Mavo_Picture_Tag {
 			wp_send_json_error( [ 'message' => 'Invalid attachment.' ] );
 		}
 
-		$meta  = wp_get_attachment_metadata( $attachment_id );
-		$sizes = [];
+		$meta       = wp_get_attachment_metadata( $attachment_id );
+		$upload_dir = wp_upload_dir();
+		$base_url   = $upload_dir['baseurl'];
+		$base_dir   = $upload_dir['basedir'];
+		$sizes      = [];
 
-		// Return every registered intermediate size without filtering.
-		// Whether a URL is a genuine resize or a silent fallback to the full file
-		// is detected on the JS side at insert time, where URLs can be compared
-		// against the full-size URL without any CDN or caching interference.
-		foreach ( get_intermediate_image_sizes() as $size_name ) {
-			$src = wp_get_attachment_image_src( $attachment_id, $size_name );
-			if ( ! $src ) {
-				continue;
-			}
+		// Derive the upload sub-directory (e.g. "2026/03") from the full-size
+		// file path stored in metadata.  All size filenames live in this same dir.
+		$full_file = $meta['file'] ?? '';                     // e.g. "2026/03/IMG_1987.jpeg"
+		$sub_dir   = $full_file ? dirname( $full_file ) : ''; // e.g. "2026/03"
+
+		// Build URLs directly from metadata filenames to bypass any CDN
+		// (e.g. Jetpack PhotoCDN) that may rewrite wp_get_attachment_image_src()
+		// URLs to a single origin URL for all sizes.
+		foreach ( $meta['sizes'] ?? [] as $size_name => $size_meta ) {
+			$rel = '/' . $sub_dir . '/' . $size_meta['file'];  // "/2026/03/IMG_1987-480x360.jpeg"
 			$sizes[ $size_name ] = [
-				'url'     => $src[0],
-				'width'   => $src[1],
-				'height'  => $src[2],
-				'webp'    => $this->get_webp_url( $attachment_id, $size_name, $meta ),
-				'label'   => ucfirst( str_replace( '-', ' ', $size_name ) )
-					. ' (' . $src[1] . '×' . $src[2] . ')',
+				'url'    => $base_url . $rel,
+				'width'  => $size_meta['width'],
+				'height' => $size_meta['height'],
+				'webp'   => $this->get_webp_url( $size_name, $meta, $base_url, $base_dir, $rel ),
+				'label'  => ucfirst( str_replace( '-', ' ', $size_name ) )
+					. ' (' . $size_meta['width'] . '×' . $size_meta['height'] . ')',
 			];
 		}
 
-		// Also include the full/original size.
-		$full = wp_get_attachment_image_src( $attachment_id, 'full' );
-		if ( $full ) {
+		// Full (original) size.
+		if ( $full_file ) {
+			$rel = '/' . $full_file;
 			$sizes['full'] = [
-				'url'    => $full[0],
-				'width'  => $full[1],
-				'height' => $full[2],
-				'webp'   => $this->get_webp_url( $attachment_id, 'full', $meta ),
-				'label'  => 'Full (' . $full[1] . '×' . $full[2] . ')',
+				'url'    => $base_url . $rel,
+				'width'  => $meta['width']  ?? 0,
+				'height' => $meta['height'] ?? 0,
+				'webp'   => $this->get_webp_url( 'full', $meta, $base_url, $base_dir, $rel ),
+				'label'  => 'Full (' . ( $meta['width'] ?? 0 ) . '×' . ( $meta['height'] ?? 0 ) . ')',
 			];
 		}
 
@@ -283,70 +287,59 @@ class Mavo_Picture_Tag {
 	/* ------------------------------------------------------------------ */
 
 	/**
-	 * Try to resolve a WebP URL for a given attachment + size.
+	 * Try to resolve a WebP URL for a given size.
+	 *
+	 * Accepts the already-computed relative path (e.g. "/2026/03/IMG_1987-480x360.jpeg")
+	 * so that no CDN-affected WordPress functions are called internally.
 	 *
 	 * Supports:
 	 *  1. WordPress 6.1+ native multi-MIME sources stored in attachment meta.
-	 *  2. A filesystem check: replace extension with .webp and verify the
-	 *     file exists on disk (covers most WebP-conversion plugins).
+	 *  2. Filesystem checks using two common WebP naming conventions.
 	 *
-	 * @param int    $attachment_id
 	 * @param string $size_name  Registered size name or 'full'.
 	 * @param array  $meta       wp_get_attachment_metadata() result.
+	 * @param string $base_url   Uploads base URL (no trailing slash).
+	 * @param string $base_dir   Uploads base directory (no trailing slash).
+	 * @param string $relative   Relative path to the source file, e.g. "/2026/03/IMG.jpeg".
 	 * @return string|null  WebP URL, or null when none found.
 	 */
-	private function get_webp_url( int $attachment_id, string $size_name, array $meta ): ?string {
+	private function get_webp_url( string $size_name, array $meta, string $base_url, string $base_dir, string $relative ): ?string {
 
 		// 1. WordPress 6.1+ stores alternate MIME sources under 'sources'.
 		//    Structure: $meta['sizes'][$size]['sources']['image/webp']['url']
 		//    or         $meta['sources']['image/webp']['file'] (for 'full').
+		$sub_dir = $meta['file'] ? dirname( $meta['file'] ) : '';
+
 		if ( 'full' === $size_name ) {
 			$webp_file = $meta['sources']['image/webp']['file'] ?? null;
 			if ( $webp_file ) {
-				$upload_dir = wp_upload_dir();
-				$year_month = isset( $meta['file'] )
-					? implode( '/', array_slice( explode( '/', $meta['file'] ), 0, -1 ) )
-					: '';
-				return $upload_dir['baseurl'] . '/' . $year_month . '/' . $webp_file;
+				return $base_url . '/' . $sub_dir . '/' . $webp_file;
 			}
 		} else {
-			$webp_url = $meta['sizes'][ $size_name ]['sources']['image/webp']['url']
+			$webp_val = $meta['sizes'][ $size_name ]['sources']['image/webp']['url']
 				?? ( $meta['sizes'][ $size_name ]['sources']['image/webp']['file'] ?? null );
 
-			if ( $webp_url ) {
-				// If it's just a filename, resolve to full URL.
-				if ( ! str_starts_with( $webp_url, 'http' ) ) {
-					$src = wp_get_attachment_image_src( $attachment_id, $size_name );
-					$webp_url = $src
-						? preg_replace( '/\.[^.]+$/', '.webp', $src[0] )
-						: null;
+			if ( $webp_val ) {
+				if ( str_starts_with( $webp_val, 'http' ) ) {
+					return $webp_val;
 				}
-				return $webp_url;
+				// It's a bare filename — resolve using the known sub-directory.
+				return $base_url . '/' . $sub_dir . '/' . $webp_val;
 			}
 		}
 
-		// 2. Filesystem checks: try several WebP filename conventions.
-		$src = wp_get_attachment_image_src( $attachment_id, $size_name );
-		if ( ! $src ) {
-			return null;
+		// 2. Filesystem checks using the known relative path.
+
+		// 2a. Appended extension: IMG_1987-480x360.jpeg → IMG_1987-480x360.jpeg.webp
+		//     (used by WebP Express and similar plugins).
+		if ( file_exists( $base_dir . $relative . '.webp' ) ) {
+			return $base_url . $relative . '.webp';
 		}
 
-		$upload_dir = wp_upload_dir();
-		$relative   = str_replace( $upload_dir['baseurl'], '', $src[0] );
-
-		// 2a. Appended extension: image-640x800.jpg → image-640x800.jpg.webp
-		//     (used by WebP Express and similar plugins that keep the original
-		//     filename intact and simply append .webp).
-		$webp_appended = $relative . '.webp';
-		if ( file_exists( $upload_dir['basedir'] . $webp_appended ) ) {
-			return $upload_dir['baseurl'] . $webp_appended;
-		}
-
-		// 2b. Exact extension swap: image-640x800.jpg → image-640x800.webp
-		//     (fallback for plugins that replace the extension instead).
-		$webp_swapped = preg_replace( '/\.[^.\/]+$/', '.webp', $relative );
-		if ( file_exists( $upload_dir['basedir'] . $webp_swapped ) ) {
-			return $upload_dir['baseurl'] . $webp_swapped;
+		// 2b. Extension swap: IMG_1987-480x360.jpeg → IMG_1987-480x360.webp
+		$swapped = preg_replace( '/\.[^.\/]+$/', '.webp', $relative );
+		if ( file_exists( $base_dir . $swapped ) ) {
+			return $base_url . $swapped;
 		}
 
 		return null;

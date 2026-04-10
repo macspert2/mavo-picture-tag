@@ -53,11 +53,16 @@
 		/*  Toolbar button                                                   */
 		/* ---------------------------------------------------------------- */
 
-		/* Register <source> in TinyMCE's schema so it is preserved by both
-		   the HTML parser (on sync from Code tab) and the serialiser (on
-		   save). addValidChildren also permits <source> as a child of
-		   <picture>, which TinyMCE 4's default schema does not allow. */
+		/* Register <picture> and <source> in TinyMCE's schema.
+		   - blockElements: marks <picture> as block-level so the serialiser
+		     keeps all <source> siblings inside one <picture> instead of
+		     wrapping each in its own <picture> element.
+		   - addValidElements: whitelists <source> with its attributes.
+		   - addValidChildren: permits <source> and <img> inside <picture>. */
 		editor.on( 'init', function () {
+			if ( editor.schema.blockElements ) {
+				editor.schema.blockElements.picture = {};
+			}
 			editor.schema.addValidElements( 'source[srcset|type|media|sizes]' );
 			editor.schema.addValidChildren( '+picture[source|img]' );
 		} );
