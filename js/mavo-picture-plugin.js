@@ -179,10 +179,18 @@
 			var prefill = existingNode ? parsePictureNode( existingNode, sizes ) : null;
 
 			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
+			var closestSize = function ( target ) {
+				if ( ! nonFull.length ) { return ''; }
+				return nonFull.reduce( function ( best, curr ) {
+					return Math.abs( sizes[ curr ].width - target ) <
+					       Math.abs( sizes[ best ].width - target ) ? curr : best;
+				}, nonFull[ 0 ] );
+			};
 			var defaultSources = [
-				{ sizeName: nonFull[ 0 ], minWidth: 640 },
-				{ sizeName: nonFull[ 2 ], minWidth: 480 }
-			].filter( function ( s ) { return s.sizeName; } );
+				{ sizeName: 'full',             minWidth: 960 },
+				{ sizeName: closestSize( 640 ), minWidth: 640 },
+				{ sizeName: closestSize( 480 ), minWidth: 480 }
+			].filter( function ( s ) { return s.sizeName && sizes[ s.sizeName ]; } );
 
 			var sourcesToRender = prefill ? prefill.sources : defaultSources;
 			sourceRows = sourcesToRender.slice();
