@@ -537,8 +537,7 @@
 		function pickDefaultFallback( sizes, sizeNames ) {
 			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
 			if ( ! nonFull.length ) { return sizeNames[ 0 ] || ''; }
-			if ( sizes.large ) { return 'large'; }
-			var target = 960;
+			var target = 480;
 			return nonFull.reduce( function ( best, curr ) {
 				return Math.abs( sizes[ curr ].width - target ) <
 				       Math.abs( sizes[ best ].width - target ) ? curr : best;
