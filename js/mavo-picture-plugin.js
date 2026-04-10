@@ -65,6 +65,56 @@
 			}
 			editor.schema.addValidElements( 'source[srcset|type|media|sizes]' );
 			editor.schema.addValidChildren( '+picture[source|img]' );
+			/* Allow the placeholder div to keep its data attribute through serialisation. */
+			editor.schema.addValidElements( '+div[data-mavo-html]' );
+
+			/* Style the placeholder inside the editor iframe. */
+			editor.dom.addStyle(
+				'.mavo-picture-block{display:inline-block;max-width:100%;border:2px solid #2271b1;' +
+				'border-radius:2px;cursor:pointer;}' +
+				'.mavo-picture-block img{display:block;max-width:100%;}'
+			);
+
+			/* ---- Content protection ----------------------------------------
+			   When TinyMCE loads HTML (switching to the Visual tab or on page
+			   load), its parser mangles <source> elements inside <picture>.
+			   Fix: convert every <figure class="wp-picture-figure"> and every
+			   standalone <picture> to a non-editable placeholder div whose
+			   data-mavo-html attribute holds the original HTML Base64-encoded.
+			   GetContent (below) restores the original markup when saving or
+			   switching back to the Text tab.
+			----------------------------------------------------------------- */
+			editor.on( 'BeforeSetContent', function ( e ) {
+				if ( e.format === 'raw' ) { return; }
+				e.content = e.content.replace(
+					/<figure\b[^>]*class="wp-picture-figure"[^>]*>[\s\S]*?<\/figure>|<picture[\s\S]*?<\/picture>/gi,
+					function ( match ) {
+						var encoded = btoa( unescape( encodeURIComponent( match ) ) );
+						var src = ( match.match( /<img\b[^>]+src="([^"]+)"/i ) || [] )[ 1 ] || '';
+						var alt = ( match.match( /<img\b[^>]+alt="([^"]*)"/i ) || [] )[ 1 ] || '';
+						return '<div class="mavo-picture-block" data-mavo-html="' + encoded +
+						       '" contenteditable="false">' +
+						       ( src
+						           ? '<img src="' + src + '" alt="' + alt.replace( /"/g, '&quot;' ) + '">'
+						           : '<span>[Picture Tag]</span>' ) +
+						       '</div>';
+					}
+				);
+			} );
+
+			/* Restore <picture> HTML when TinyMCE serialises content. */
+			editor.on( 'GetContent', function ( e ) {
+				if ( e.format === 'raw' ) { return; }
+				e.content = e.content.replace(
+					/<div\b[^>]*class="mavo-picture-block"[^>]*>[\s\S]*?<\/div>/gi,
+					function ( match ) {
+						var m = match.match( /\bdata-mavo-html="([^"]*)"/i );
+						if ( ! m ) { return match; }
+						try { return decodeURIComponent( escape( atob( m[ 1 ] ) ) ); }
+						catch ( ex ) { return match; }
+					}
+				);
+			} );
 		} );
 
 		editor.addButton( 'mavo_picture', {
@@ -159,7 +209,7 @@
 		 * @param {Object}           sizes        AJAX sizes response.
 		 * @param {HTMLElement|null} existingNode Existing <picture>/<figure> for edit.
 		 */
-		function openDialog( attachment, sizes, existingNode ) {
+		function openDialog( attachment, sizes, existingNode, externalPrefill ) {
 			currentAttach = attachment;
 			currentSizes  = sizes;
 			sourceRows    = [];
@@ -175,8 +225,12 @@
 				return { value: k, text: sizes[ k ].label };
 			} );
 
-			/* Parse existing node (edit mode) or set up defaults (insert mode). */
-			var prefill = existingNode ? parsePictureNode( existingNode, sizes ) : null;
+			/* externalPrefill is supplied when editing a placeholder div (the
+			   stored HTML is decoded and parsed before openDialog is called).
+			   Fall back to parsing the existingNode directly for raw picture nodes. */
+			var prefill = ( externalPrefill !== undefined )
+				? externalPrefill
+				: ( existingNode ? parsePictureNode( existingNode, sizes ) : null );
 
 			var nonFull = sizeNames.filter( function ( k ) { return k !== 'full'; } );
 			var closestSize = function ( target ) {
@@ -373,12 +427,21 @@
 
 				$overlay.remove();
 
-				/* Use editor.dom to create and insert nodes directly into the
-				   editor's iframe DOM, bypassing TinyMCE's HTML parser. This
-				   is the only reliable way to preserve <source> elements;
-				   editor.insertContent() runs the markup through TinyMCE's
-				   whitelist filter even after schema updates. */
-				var newNode = editor.dom.create( 'div', {}, html ).firstChild;
+				/* Store the picture HTML as a non-editable placeholder div.
+				   This is consistent with the BeforeSetContent protection:
+				   the visual editor always shows a placeholder; the real
+				   <picture> HTML lives in data-mavo-html and is restored
+				   by GetContent when switching to the Text tab or saving. */
+				var _src     = ( html.match( /<img\b[^>]+src="([^"]+)"/i )  || [] )[ 1 ] || '';
+				var _alt     = ( html.match( /<img\b[^>]+alt="([^"]*)"/i )  || [] )[ 1 ] || '';
+				var _encoded = btoa( unescape( encodeURIComponent( html ) ) );
+				var newNode  = editor.dom.create( 'div', {
+					'class'           : 'mavo-picture-block',
+					'data-mavo-html'  : _encoded,
+					'contenteditable' : 'false'
+				}, _src
+					? '<img src="' + _src + '" alt="' + _alt.replace( /"/g, '&quot;' ) + '">'
+					: '<span>[Picture Tag]</span>' );
 
 				if ( existingNode ) {
 					existingNode.parentNode.replaceChild( newNode, existingNode );
@@ -478,6 +541,9 @@
 		/* ---------------------------------------------------------------- */
 
 		function reopenForEdit( node ) {
+			var isPlaceholder = node.nodeName === 'DIV' &&
+			                    ( node.className || '' ).indexOf( 'mavo-picture-block' ) >= 0;
+
 			var frame = wp.media( {
 				title    : i18n.buttonTitleEdit || 'Edit Picture Tag',
 				button   : { text: i18n.mediaButton || 'Use this image' },
@@ -488,7 +554,24 @@
 			frame.on( 'select', function () {
 				var attachment = frame.state().get( 'selection' ).first().toJSON();
 				fetchSizes( attachment.id, function ( sizes ) {
-					openDialog( attachment, sizes, node );
+					var prefill = null;
+
+					if ( isPlaceholder ) {
+						/* Decode the stored HTML and parse it to prefill the dialog. */
+						var encoded = node.getAttribute( 'data-mavo-html' );
+						if ( encoded ) {
+							try {
+								var tmp = document.createElement( 'div' );
+								tmp.innerHTML = decodeURIComponent( escape( atob( encoded ) ) );
+								var picOrFig = tmp.querySelector( 'figure' ) || tmp.querySelector( 'picture' );
+								if ( picOrFig ) { prefill = parsePictureNode( picOrFig, sizes ); }
+							} catch ( ex ) {}
+						}
+					} else {
+						prefill = parsePictureNode( node, sizes );
+					}
+
+					openDialog( attachment, sizes, node, prefill );
 				} );
 			} );
 
@@ -569,6 +652,9 @@
 			while ( node && node.nodeName !== 'BODY' ) {
 				if ( node.nodeName === 'PICTURE' ) { return node; }
 				if ( node.nodeName === 'FIGURE' && node.querySelector( 'picture' ) ) { return node; }
+				if ( node.nodeName === 'DIV' && ( node.className || '' ).indexOf( 'mavo-picture-block' ) >= 0 ) {
+					return node;
+				}
 				node = node.parentNode;
 			}
 			return null;
